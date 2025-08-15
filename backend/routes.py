@@ -1,42 +1,45 @@
-import datetime
-
 from flask import Blueprint, request, jsonify, abort
-from sqlalchemy.exc import IntegrityError
+from datetime import date
 
-from . import db
+from . import _db
 from .models import Cliente, Propiedad, Hipoteca, Pago
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
+# ------------------- Helpers -------------------
+
 def calcular_amortizacion(hipoteca):
-    """Calcula el plan de amortización mensual para una hipoteca."""
+    """Calcula el plan de amortización mensual.
+
+    Devuelve una lista de dicts con cuota, capital y interés por mes."""
     P = hipoteca.monto_principal
-    r_annual = hipoteca.tasa_interes_anual / 100.0
-    n_years = hipoteca.plazo_anos
-    n_months = n_years * 12
+    r = hipoteca.tasa_interes_anual / 100 / 12
+    n = hipoteca.plazo_anos * 12
 
-    if r_annual == 0:
-        cuota_mensual = P / n_months
+    if r == 0:
+        cuota = P / n
     else:
-        r_monthly = r_annual / 12.0
-        cuota_mensual = P * (r_monthly * (1 + r_monthly) ** n_months) / ((1 + r_monthly) ** n_months - 1)
+        cuota = P * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
-    plan = []
-    saldo_restante = P
-    for mes in range(1, n_months + 1):
-        interes_mensual = saldo_restante * (r_annual / 12.0)
-        capital = cuota_mensual - interes_mensual
-        saldo_restante -= capital
-
-        plan.append({
+    amortizacion = []
+    saldo = P
+    for mes in range(1, n + 1):
+        interes = saldo * r
+        capital = cuota - interes
+        saldo -= capital
+        if saldo < 0:
+            saldo = 0
+        amortizacion.append({
             'mes': mes,
-            'cuota_mensual': round(cuota_mensual, 2),
-            'capital': round(capital, 2),
-            'interes': round(interes_mensual, 2),
-            'saldo_restante': round(max(saldo_restante, 0.0), 2)
+            'cuota_mensual': round(cuota, 2),
+            'capital_amortizado': round(capital, 2),
+            'interes_pagado': round(interes, 2),
+            'saldo_restante': round(saldo, 2)
         })
 
-    return plan
+    return amortizacion
+
+# ------------------- Endpoints -------------------
 
 @api_bp.route('/hipotecas', methods=['GET'])
 def get_hipotecas():
@@ -45,34 +48,40 @@ def get_hipotecas():
     for h in hipotecas:
         result.append({
             'id': h.id,
-            'cliente_nombre': h.cliente.nombre_completo,
-            'propiedad_direccion': h.propiedad.direccion_completa,
+            'cliente_nombre': h.cliente.nombre_completo if h.cliente else None,
+            'propiedad_direccion': h.propiedad.direccion_completa if h.propiedad else None,
             'monto_principal': h.monto_principal,
-            'estado': h.estado
-        })
+            'estado': h.estado        })
     return jsonify(result)
 
 @api_bp.route('/hipotecas', methods=['POST'])
 def crear_hipoteca():
     data = request.get_json() or {}
-
     cliente_id = data.get('cliente_id')
     propiedad_id = data.get('propiedad_id')
 
-    if not Cliente.query.get(cliente_id) or not Propiedad.query.get(propiedad_id):
-        abort(404, description='Cliente o propiedad no encontrada')
+    cliente = Cliente.query.get(cliente_id)
+    propiedad = Propiedad.query.get(propiedad_id)
 
-    hipoteca = Hipoteca(**data)
-    db.session.add(hipoteca)
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback(); abort(400, description='Datos inválidos')
+    if not cliente or not propiedad:
+        abort(400, description='Cliente o propiedad no encontrados.')
+
+    hipoteca = Hipoteca(
+        cliente_id=cliente.id,
+        propiedad_id=propiedad.id,
+        monto_principal=data.get('monto_principal', 0),
+        tasa_interes_anual=data.get('tasa_interes_anual', 0),
+        plazo_anos=data.get('plazo_anos', 0),
+        fecha_inicio=date.today(),
+        estado='Activa'    )
+
+    _db.session.add(hipoteca)
+    _db.session.commit()
 
     return jsonify({'id': hipoteca.id}), 201
 
 @api_bp.route('/hipotecas/<int:id>/amortizacion', methods=['GET'])
-def obtener_amortizacion(id):
+def get_amortizacion(id):
     hipoteca = Hipoteca.query.get_or_404(id)
     plan = calcular_amortizacion(hipoteca)
     return jsonify(plan)
@@ -82,16 +91,21 @@ def registrar_pago(id):
     hipoteca = Hipoteca.query.get_or_404(id)
     data = request.get_json() or {}
 
-    pago = Pago(**data, hipoteca_id=id)
-    db.session.add(pago)
+    pago = Pago(
+        hipoteca_id=hipoteca.id,
+        fecha_pago=date.today(),
+        monto_pagado=data.get('monto_pagado', 0),
+        capital_amortizado=data.get('capital_amortizado'),
+        interes_pagado=data.get('interes_pagado')
+    )
 
-    # Actualizar estado si la hipoteca está pagada
-    total_pagado = sum(p.monto_pagado for p in hipoteca.pagos) + data.get('monto_pagado', 0.0)
-    plan_total = calcular_amortizacion(hipoteca)[-1]['saldo_restante']
+    _db.session.add(pago)
 
-    if total_pagado >= hipoteca.monto_principal and not hipoteca.estado == 'Pagada':
+    # Actualizar estado si el saldo es cero
+    plan = calcular_amortizacion(hipoteca)
+    if all(item['saldo_restante'] == 0 for item in plan):
         hipoteca.estado = 'Pagada'
 
-    db.session.commit()
+    _db.session.commit()
 
     return jsonify({'id': pago.id}), 201

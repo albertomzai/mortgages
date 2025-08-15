@@ -1,45 +1,56 @@
-from . import db
+from . import _db
 
-class Cliente(db.Model):
+class Cliente(_db.Model):
     __tablename__ = 'clientes'
 
-    id = db.Column(db.Integer, primary_key=True)
-    nombre_completo = db.Column(db.String, nullable=False)
-    email = db.Column(db.String, unique=True)
-    telefono = db.Column(db.String)
-    ingresos_anuales = db.Column(db.Float)
+    id = _db.Column(_db.Integer, primary_key=True)
+    nombre_completo = _db.Column(_db.String, nullable=False)
+    email = _db.Column(_db.String, unique=True)
+    telefono = _db.Column(_db.String)
+    ingresos_anuales = _db.Column(_db.Float)
 
-    hipotecas = db.relationship('Hipoteca', backref='cliente', lazy=True)
+    def __repr__(self):
+        return f"<Cliente {self.id} - {self.nombre_completo}>"
 
-class Propiedad(db.Model):
+class Propiedad(_db.Model):
     __tablename__ = 'propiedades'
 
-    id = db.Column(db.Integer, primary_key=True)
-    direccion_completa = db.Column(db.String, nullable=False)
-    valor_tasacion = db.Column(db.Float, nullable=False)
+    id = _db.Column(_db.Integer, primary_key=True)
+    direccion_completa = _db.Column(_db.String, nullable=False)
+    valor_tasacion = _db.Column(_db.Float, nullable=False)
 
-    hipotecas = db.relationship('Hipoteca', backref='propiedad', lazy=True)
+    def __repr__(self):
+        return f"<Propiedad {self.id} - {self.direccion_completa}>"
 
-class Hipoteca(db.Model):
+class Hipoteca(_db.Model):
     __tablename__ = 'hipotecas'
 
-    id = db.Column(db.Integer, primary_key=True)
-    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=False)
-    propiedad_id = db.Column(db.Integer, db.ForeignKey('propiedades.id'), nullable=False)
-    monto_principal = db.Column(db.Float, nullable=False)
-    tasa_interes_anual = db.Column(db.Float, nullable=False)
-    plazo_anos = db.Column(db.Integer, nullable=False)
-    fecha_inicio = db.Column(db.Date, nullable=False)
-    estado = db.Column(db.String, default='Activa')
+    id = _db.Column(_db.Integer, primary_key=True)
+    cliente_id = _db.Column(_db.Integer, _db.ForeignKey('clientes.id'))
+    propiedad_id = _db.Column(_db.Integer, _db.ForeignKey('propiedades.id'))
+    monto_principal = _db.Column(_db.Float, nullable=False)
+    tasa_interes_anual = _db.Column(_db.Float, nullable=False)
+    plazo_anos = _db.Column(_db.Integer, nullable=False)
+    fecha_inicio = _db.Column(_db.Date, nullable=False)
+    estado = _db.Column(_db.String, default='Activa')
 
-    pagos = db.relationship('Pago', backref='hipoteca', lazy=True)
+    cliente = _db.relationship('Cliente', backref=_db.backref('hipotecas', lazy=True))
+    propiedad = _db.relationship('Propiedad', backref=_db.backref('hipotecas', lazy=True))
 
-class Pago(db.Model):
+    def __repr__(self):
+        return f"<Hipoteca {self.id} - {self.estado}>"
+
+class Pago(_db.Model):
     __tablename__ = 'pagos'
 
-    id = db.Column(db.Integer, primary_key=True)
-    hipoteca_id = db.Column(db.Integer, db.ForeignKey('hipotecas.id'), nullable=False)
-    fecha_pago = db.Column(db.Date, nullable=False)
-    monto_pagado = db.Column(db.Float, nullable=False)
-    capital_amortizado = db.Column(db.Float)
-    interes_pagado = db.Column(db.Float)
+    id = _db.Column(_db.Integer, primary_key=True)
+    hipoteca_id = _db.Column(_db.Integer, _db.ForeignKey('hipotecas.id'))
+    fecha_pago = _db.Column(_db.Date, nullable=False)
+    monto_pagado = _db.Column(_db.Float, nullable=False)
+    capital_amortizado = _db.Column(_db.Float)
+    interes_pagado = _db.Column(_db.Float)
+
+    hipoteca = _db.relationship('Hipoteca', backref=_db.backref('pagos', lazy=True))
+
+    def __repr__(self):
+        return f"<Pago {self.id} - Hipoteca {self.hipoteca_id}>"
